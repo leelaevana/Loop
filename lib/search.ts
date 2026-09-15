@@ -1,7 +1,6 @@
-
 import { db } from "@/lib/db";
 
-type SearchResult = {
+export type SearchResult = {
   id: string;
   content: string;
   channel: string;
@@ -11,68 +10,35 @@ type SearchResult = {
   similarity: number;
 };
 
-function cosineSimilarity(a: number[], b: number[]) {
-  if (a.length !== b.length) {
-    return 0;
-  }
-
-  let dot = 0;
-  let magnitudeA = 0;
-  let magnitudeB = 0;
-
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    magnitudeA += a[i] * a[i];
-    magnitudeB += b[i] * b[i];
-  }
-
-  if (magnitudeA === 0 || magnitudeB === 0) {
-    return 0;
-  }
-
-  return dot / (Math.sqrt(magnitudeA) * Math.sqrt(magnitudeB));
-}
-
 export async function searchFeedback(
   workspaceId: string,
   queryVector: number[],
   limit = 10
 ): Promise<SearchResult[]> {
-  const feedback = await db.feedback.findMany({
-    where: {
-      workspaceId,
-      embedding: {
-        isNot: null,
-      },
-    },
-    include: {
-      embedding: true,
-    },
-  });
+  if (!queryVector.length) {
+    return [];
+  }
 
-  const results = feedback
-    .map((item) => {
-      const storedVector = Array.isArray(item.embedding?.vector)
-        ? (item.embedding.vector as number[])
-        : [];
+  // Convert the query embedding into pgvector's expected format.
+  const vectorLiteral = `[${queryVector.join(",")}]`;
 
-      const similarity = cosineSimilarity(
-        queryVector,
-        storedVector
-      );
-
-      return {
-        id: item.id,
-        content: item.content,
-        channel: item.channel,
-        sentiment: item.sentiment,
-        featureArea: item.featureArea,
-        status: item.status,
-        similarity,
-      };
-    })
-    .sort((a, b) => b.similarity - a.similarity)
-    .slice(0, limit);
+  const results = await db.$queryRaw<SearchResult[]>`
+    SELECT
+      f.id,
+      f.content,
+      f.channel,
+      f.sentiment::text AS sentiment,
+      f."featureArea",
+      f.status::text AS status,
+      1 - (e."vector_pg" <=> ${vectorLiteral}::vector) AS similarity
+    FROM "Feedback" f
+    INNER JOIN "Embedding" e
+      ON e."feedbackId" = f.id
+    WHERE f."workspaceId" = ${workspaceId}
+      AND e."vector_pg" IS NOT NULL
+    ORDER BY e."vector_pg" <=> ${vectorLiteral}::vector
+    LIMIT ${limit}
+  `;
 
   return results;
 }

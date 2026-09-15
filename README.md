@@ -165,34 +165,36 @@ AI responses are validated with Zod before being used by the application.
 
 ## Semantic Search
 
-Feedback can be converted into embeddings using Gemini's embedding API.
+Feedback can be converted into 3072-dimensional embeddings using
+Gemini's embedding API.
 
-The embedding is used to find feedback that is semantically related to a user's question.
+The embeddings are stored in PostgreSQL using the `pgvector`
+extension. Ask LOOP converts the user's question into an embedding
+and performs cosine-distance similarity search directly in PostgreSQL.
 
-Example:
+Search flow:
 
-```text
-Question:
-"Why are customers unhappy with payments?"
+User Question
+      ↓
+Gemini Embedding API
+      ↓
+Query Embedding
+      ↓
+PostgreSQL pgvector
+      ↓
+Cosine Similarity Search
+      ↓
+Workspace-Scoped Feedback
+      ↓
+Relevant Feedback
+      ↓
+AI-Generated Answer
 
-        ↓
+All semantic-search queries are restricted to the authenticated
+user's workspace to maintain multi-tenant data isolation.
 
-Query embedding
-
-        ↓
-
-Semantic similarity search
-
-        ↓
-
-Relevant customer feedback
-
-        ↓
-
-Gemini-generated answer
-```
-
-The Ask LOOP feature uses workspace-scoped feedback as its context.
+The application also retains the embedding in the JSON `vector`
+field while using the PostgreSQL `vector` column for semantic search.
 
 ## Dashboard
 
@@ -415,7 +417,6 @@ API keys and database credentials are kept server-side.
 
 ### Future Improvements
 
-* PostgreSQL pgvector integration for production-scale vector search
 * Automated theme clustering
 * Additional feedback source integrations
 * Advanced workspace administration

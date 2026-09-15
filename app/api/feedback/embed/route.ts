@@ -37,11 +37,21 @@ export async function POST() {
     for (const item of feedback) {
       const vector = await generateEmbedding(item.content);
 
-      await db.embedding.create({
-        data: {
-          feedbackId: item.id,
-          vector,
-        },
+      const vectorLiteral = `[${vector.join(",")}]`;
+
+      await db.$transaction(async (tx) => {
+        await tx.embedding.create({
+          data: {
+            feedbackId: item.id,
+            vector,
+          },
+        });
+
+        await tx.$executeRaw`
+          UPDATE "Embedding"
+          SET "vector_pg" = ${vectorLiteral}::vector
+          WHERE "feedbackId" = ${item.id}
+        `;
       });
 
       created++;
