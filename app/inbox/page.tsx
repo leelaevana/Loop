@@ -1,6 +1,8 @@
+
 "use client";
+
 import ImportFeedback from "./ImportFeedback";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type Theme = {
   id: string;
@@ -47,7 +49,18 @@ export default function InboxPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  async function loadFeedback() {
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newContent, setNewContent] = useState("");
+  const [newChannel, setNewChannel] = useState("Website");
+  const [newCustomerLabel, setNewCustomerLabel] = useState("");
+  const [newSourceRef, setNewSourceRef] = useState("");
+
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+
+  const [bulkClassifying, setBulkClassifying] = useState(false);
+
+  const loadFeedback = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
@@ -77,11 +90,11 @@ export default function InboxPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [page, search, channel, sentiment, status]);
 
   useEffect(() => {
     loadFeedback();
-  }, [page, search, channel, sentiment, status]);
+  }, [loadFeedback]);
 
   function handleSearch(value: string) {
     setSearch(value);
@@ -103,6 +116,60 @@ export default function InboxPage() {
     setPage(1);
   }
 
+  async function addFeedback(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!newContent.trim()) {
+      setCreateError("Please enter customer feedback.");
+      return;
+    }
+
+    try {
+      setCreating(true);
+      setCreateError("");
+
+      const response = await fetch("/api/feedback", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          content: newContent.trim(),
+          channel: newChannel,
+          customerLabel: newCustomerLabel.trim() || null,
+          sourceRef: newSourceRef.trim() || null,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setCreateError(data.error || "Failed to create feedback.");
+        return;
+      }
+
+      setNewContent("");
+      setNewCustomerLabel("");
+      setNewSourceRef("");
+      setNewChannel("Website");
+      setShowAddForm(false);
+
+      setPage(1);
+      await loadFeedback();
+
+      alert(
+        `Feedback added successfully.\n\nTheme: ${
+          data.theme?.name || "Created by AI"
+        }\nEmbedding: ${data.vectorLength || 0} dimensions`
+      );
+    } catch (error) {
+      console.error(error);
+      setCreateError("Something went wrong while creating feedback.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   async function updateStatus(
     feedbackId: string,
     newStatus: string
@@ -118,21 +185,21 @@ export default function InboxPage() {
           status: newStatus,
         }),
       });
-  
+
       const data = await response.json();
-  
+
       if (!response.ok) {
         alert(data.error || "Failed to update status");
         return;
       }
-  
-      // Refresh the current page
+
       await loadFeedback();
     } catch (error) {
       console.error(error);
       alert("Something went wrong while updating status.");
     }
   }
+
   async function classifyFeedback(feedbackId: string) {
     try {
       const response = await fetch("/api/feedback/classify", {
@@ -144,22 +211,93 @@ export default function InboxPage() {
           feedbackId,
         }),
       });
-  
+
       const data = await response.json();
-  
+
       if (!response.ok) {
         alert(data.error || "AI classification failed.");
         return;
       }
-  
+
       alert("AI classification completed successfully.");
-  
+
       await loadFeedback();
     } catch (error) {
       console.error(error);
       alert("Something went wrong while classifying feedback.");
     }
   }
+
+  async function bulkClassifyFeedback() {
+    if (bulkClassifying) return;
+
+    const unclassified = feedback.filter(
+      (item) => !item.sentiment || !item.featureArea
+    );
+
+    if (unclassified.length === 0) {
+      alert(
+        "There are no unclassified feedback records on this page."
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `AI will classify ${Math.min(
+        unclassified.length,
+        5
+      )} unclassified feedback records from this page.\n\nContinue?`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setBulkClassifying(true);
+
+      const batch = unclassified.slice(0, 5);
+
+      let completed = 0;
+      let failed = 0;
+
+      for (const item of batch) {
+        try {
+          const response = await fetch("/api/feedback/classify", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              feedbackId: item.id,
+            }),
+          });
+
+          if (response.ok) {
+            completed++;
+          } else {
+            failed++;
+          }
+        } catch (error) {
+          console.error(
+            `Failed to classify feedback ${item.id}:`,
+            error
+          );
+          failed++;
+        }
+      }
+
+      await loadFeedback();
+
+      alert(
+        `Bulk AI classification completed.\n\nSuccessful: ${completed}\nFailed: ${failed}`
+      );
+    } catch (error) {
+      console.error(error);
+      alert("Bulk AI classification failed.");
+    } finally {
+      setBulkClassifying(false);
+    }
+  }
+
   function sentimentLabel(value: Feedback["sentiment"]) {
     if (value === "POS") return "Positive";
     if (value === "NEG") return "Negative";
@@ -203,14 +341,148 @@ export default function InboxPage() {
             </p>
           </div>
 
-          <a
-            href="/dashboard"
-            className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-800"
-          >
-            Dashboard
-          </a>
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                setShowAddForm((current) => !current);
+                setCreateError("");
+              }}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+            >
+              {showAddForm ? "Close" : "+ Add Feedback"}
+            </button>
+
+            <button
+              onClick={bulkClassifyFeedback}
+              disabled={bulkClassifying || loading}
+              className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {bulkClassifying
+                ? "Classifying..."
+                : "AI Classify 5"}
+            </button>
+
+            <a
+              href="/dashboard"
+              className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold hover:bg-slate-800"
+            >
+              Dashboard
+            </a>
+          </div>
         </div>
+
+        {/* Add Feedback */}
+        {showAddForm && (
+          <form
+            onSubmit={addFeedback}
+            className="mb-6 rounded-xl border border-blue-900 bg-slate-900 p-6"
+          >
+            <div className="mb-5">
+              <h2 className="text-xl font-bold">
+                Add Customer Feedback
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-400">
+                Gemini will automatically analyze the feedback and
+                create or reuse a theme.
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <label className="mb-2 block text-sm font-medium text-slate-300">
+                  Customer Feedback *
+                </label>
+
+                <textarea
+                  value={newContent}
+                  onChange={(e) => setNewContent(e.target.value)}
+                  placeholder="Example: The checkout page is very slow and sometimes takes more than 10 seconds to complete my payment."
+                  rows={4}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-300">
+                  Channel
+                </label>
+
+                <select
+                  value={newChannel}
+                  onChange={(e) => setNewChannel(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none"
+                >
+                  <option value="Website">Website</option>
+                  <option value="Survey">Survey</option>
+                  <option value="App Store">App Store</option>
+                  <option value="Chat">Chat</option>
+                  <option value="Email">Email</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-300">
+                  Customer
+                </label>
+
+                <input
+                  type="text"
+                  value={newCustomerLabel}
+                  onChange={(e) =>
+                    setNewCustomerLabel(e.target.value)
+                  }
+                  placeholder="Optional customer name"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-300">
+                  Source Reference
+                </label>
+
+                <input
+                  type="text"
+                  value={newSourceRef}
+                  onChange={(e) => setNewSourceRef(e.target.value)}
+                  placeholder="Optional reference"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            {createError && (
+              <div className="mt-4 rounded-lg border border-red-900 bg-red-950 p-3 text-sm text-red-300">
+                {createError}
+              </div>
+            )}
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddForm(false);
+                  setCreateError("");
+                }}
+                className="rounded-lg border border-slate-700 px-5 py-2.5 text-sm font-semibold hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="submit"
+                disabled={creating}
+                className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {creating ? "Analyzing..." : "Add & Analyze"}
+              </button>
+            </div>
+          </form>
+        )}
+
         <ImportFeedback />
+
         {/* Filters */}
         <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900 p-5">
           <div className="grid gap-4 md:grid-cols-4">
@@ -283,21 +555,26 @@ export default function InboxPage() {
                     <th className="px-5 py-4 font-semibold text-slate-300">
                       Feedback
                     </th>
+
                     <th className="px-5 py-4 font-semibold text-slate-300">
                       Channel
                     </th>
+
                     <th className="px-5 py-4 font-semibold text-slate-300">
                       Sentiment
                     </th>
+
                     <th className="px-5 py-4 font-semibold text-slate-300">
                       Theme
                     </th>
+
                     <th className="px-5 py-4 font-semibold text-slate-300">
                       Status
                     </th>
+
                     <th className="px-5 py-4 font-semibold text-slate-300">
-  Action
-</th>
+                      Action
+                    </th>
                   </tr>
                 </thead>
 
@@ -313,7 +590,8 @@ export default function InboxPage() {
                         </p>
 
                         <div className="mt-2 text-xs text-slate-500">
-                          {item.customerLabel} • {item.sourceRef}
+                          {item.customerLabel || "Unknown"} •{" "}
+                          {item.sourceRef || "No reference"}
                         </div>
                       </td>
 
@@ -338,38 +616,46 @@ export default function InboxPage() {
                       </td>
 
                       <td className="px-5 py-5">
-  <span
-    className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass(
-      item.status
-    )}`}
-  >
-    {item.status}
-  </span>
-</td>
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass(
+                            item.status
+                          )}`}
+                        >
+                          {item.status}
+                        </span>
+                      </td>
 
-<td className="px-5 py-5">
-<div className="flex flex-col gap-2">
-  <select
-    value={item.status}
-    onChange={(e) =>
-      updateStatus(item.id, e.target.value)
-    }
-    className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-  >
-    <option value="NEW">NEW</option>
-    <option value="REVIEWED">REVIEWED</option>
-    <option value="ACTIONED">ACTIONED</option>
-  </select>
+                      <td className="px-5 py-5">
+                        <div className="flex flex-col gap-2">
+                          <select
+                            value={item.status}
+                            onChange={(e) =>
+                              updateStatus(
+                                item.id,
+                                e.target.value
+                              )
+                            }
+                            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
+                          >
+                            <option value="NEW">NEW</option>
+                            <option value="REVIEWED">
+                              REVIEWED
+                            </option>
+                            <option value="ACTIONED">
+                              ACTIONED
+                            </option>
+                          </select>
 
-  <button
-    onClick={() => classifyFeedback(item.id)}
-    className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-500"
-  >
-    AI Classify
-  </button>
-</div>
-</td>
-
+                          <button
+                            onClick={() =>
+                              classifyFeedback(item.id)
+                            }
+                            className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-500"
+                          >
+                            AI Classify
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -384,7 +670,11 @@ export default function InboxPage() {
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => setPage((current) => Math.max(current - 1, 1))}
+                  onClick={() =>
+                    setPage((current) =>
+                      Math.max(current - 1, 1)
+                    )
+                  }
                   disabled={page === 1}
                   className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 hover:bg-slate-800"
                 >

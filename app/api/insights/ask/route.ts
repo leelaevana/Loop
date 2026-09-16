@@ -33,7 +33,18 @@ export async function POST(request: Request) {
     const results = await searchFeedback(
       user.workspaceId,
       queryVector,
-      10
+      20
+    );
+
+    console.log(
+      "ASK LOOP SEARCH RESULTS:",
+      results.map((item) => ({
+        content: item.content,
+        channel: item.channel,
+        sentiment: item.sentiment,
+        featureArea: item.featureArea,
+        similarity: item.similarity,
+      }))
     );
 
     if (results.length === 0) {
@@ -78,6 +89,8 @@ Rules:
 - If the feedback does not contain enough information, clearly say so.
 - Give a concise and useful business answer.
 - Mention specific patterns when they are supported by the feedback.
+- Do not claim that all customer feedback has a pattern unless the provided feedback supports that statement.
+- Clearly distinguish between "the retrieved feedback" and "all customer feedback".
 
 Relevant customer feedback:
 ${context}
@@ -86,29 +99,62 @@ User question:
 ${question}
 `;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: prompt,
-                },
-              ],
-            },
-          ],
-        }),
-      }
-    );
+    // Retry temporary Gemini errors
+    let response: Response | null = null;
 
-    if (!response.ok) {
-      const errorText = await response.text();
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: prompt,
+                  },
+                ],
+              },
+            ],
+          }),
+        }
+      );
+
+      if (response.ok) {
+        break;
+      }
+
+      if (
+        response.status !== 503 &&
+        response.status !== 429 &&
+        response.status !== 500
+      ) {
+        break;
+      }
+
+      if (attempt < 3) {
+        const delay = attempt * 2000;
+
+        console.log(
+          `Gemini temporary error (${response.status}). Retrying in ${
+            delay / 1000
+          }s...`
+        );
+
+        await new Promise((resolve) =>
+          setTimeout(resolve, delay)
+        );
+      }
+    }
+
+    if (!response || !response.ok) {
+      const errorText = response
+        ? await response.text()
+        : "No response from Gemini.";
 
       console.error(
         "Gemini Ask LOOP error:",
@@ -116,8 +162,11 @@ ${question}
       );
 
       return NextResponse.json(
-        { error: "Gemini API request failed." },
-        { status: 500 }
+        {
+          error:
+            "Gemini is temporarily unavailable. Please try again in a moment.",
+        },
+        { status: 503 }
       );
     }
 

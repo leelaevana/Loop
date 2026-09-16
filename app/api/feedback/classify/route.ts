@@ -1,3 +1,4 @@
+
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/current-user";
 import { db } from "@/lib/db";
@@ -22,7 +23,6 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-
     const feedbackId = String(body.feedbackId || "");
 
     if (!feedbackId) {
@@ -32,6 +32,8 @@ export async function POST(request: Request) {
       );
     }
 
+    // Always verify the feedback belongs to the
+    // authenticated user's workspace.
     const feedback = await db.feedback.findFirst({
       where: {
         id: feedbackId,
@@ -46,8 +48,10 @@ export async function POST(request: Request) {
       );
     }
 
+    // Ask Gemini to classify the feedback.
     const result = await classifyFeedback(feedback.content);
 
+    // Update sentiment and feature area.
     const updatedFeedback = await db.feedback.update({
       where: {
         id: feedback.id,
@@ -59,13 +63,20 @@ export async function POST(request: Request) {
       },
     });
 
+    // Find an existing theme inside THIS workspace only.
+    // Case-insensitive matching prevents duplicate themes such as:
+    // "Slow Checkout" and "slow checkout".
     let theme = await db.theme.findFirst({
       where: {
         workspaceId: user.workspaceId,
-        name: result.theme,
+        name: {
+          equals: result.theme,
+          mode: "insensitive",
+        },
       },
     });
 
+    // Create the theme if it does not already exist.
     if (!theme) {
       theme = await db.theme.create({
         data: {
@@ -76,6 +87,7 @@ export async function POST(request: Request) {
       });
     }
 
+    // Connect the feedback to the theme.
     await db.feedbackTheme.upsert({
       where: {
         feedbackId_themeId: {
@@ -108,3 +120,4 @@ export async function POST(request: Request) {
     );
   }
 }
+

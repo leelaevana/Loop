@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
@@ -10,12 +9,20 @@ type UserInfo = {
   workspaceId: string;
 };
 
+type WorkspaceInfo = {
+  id: string;
+  name: string;
+  createdAt: string;
+};
+
 export default function SettingsPage() {
   const [user, setUser] = useState<UserInfo | null>(null);
+  const [workspace, setWorkspace] =
+    useState<WorkspaceInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function loadUser() {
+    async function loadSettings() {
       try {
         const response = await fetch("/api/auth/session");
         const data = await response.json();
@@ -28,14 +35,27 @@ export default function SettingsPage() {
             workspaceId: data.user.workspaceId || "",
           });
         }
+
+        const workspaceResponse =
+          await fetch("/api/workspace");
+
+        const workspaceData =
+          await workspaceResponse.json();
+
+        if (workspaceData?.workspace) {
+          setWorkspace(workspaceData.workspace);
+        }
       } catch (error) {
-        console.error("Failed to load session:", error);
+        console.error(
+          "Failed to load settings:",
+          error
+        );
       } finally {
         setLoading(false);
       }
     }
 
-    loadUser();
+    loadSettings();
   }, []);
 
   return (
@@ -140,7 +160,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-semibold">
-                      LOOP Demo Workspace
+                      {workspace?.name || "Workspace"}
                     </p>
 
                     <p className="mt-1 text-sm text-slate-500">

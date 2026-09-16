@@ -170,18 +170,24 @@ ${context}
 
     if (!response.ok) {
       const errorText = await response.text();
-
-      console.error(
-        "Gemini report error:",
-        errorText
-      );
-
+    
+      console.error("Gemini report error:", errorText);
+    
+      if (response.status === 429) {
+        return NextResponse.json(
+          {
+            error:
+              "Gemini API quota exceeded. Please try again after the quota resets or enable billing for the Gemini API project.",
+          },
+          { status: 429 }
+        );
+      }
+    
       return NextResponse.json(
         { error: "Gemini API request failed." },
         { status: 500 }
       );
     }
-
     const data = await response.json();
 
     const text =

@@ -36,6 +36,7 @@ export async function searchFeedback(
       ON e."feedbackId" = f.id
     WHERE f."workspaceId" = ${workspaceId}
       AND e."vector_pg" IS NOT NULL
+      AND 1 - (e."vector_pg" <=> ${vectorLiteral}::vector) >= 0.45
     ORDER BY e."vector_pg" <=> ${vectorLiteral}::vector
     LIMIT ${limit}
   `;
