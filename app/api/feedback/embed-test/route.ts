@@ -42,7 +42,8 @@ export async function POST() {
 
     const vectorLiteral = `[${vector.join(",")}]`;
 
-    const embedding = await db.$transaction(async (tx: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const embedding = await db.$transaction(async (tx: any) => {
         const createdEmbedding = await tx.embedding.create({
           data: {
             feedbackId: feedback.id,
