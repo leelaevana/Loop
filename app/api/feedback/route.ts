@@ -166,7 +166,7 @@ export async function POST(request: Request) {
 
     // Step 3: Create feedback, theme relationship,
     // and embedding in one database transaction.
-    const result = await db.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx: any) => {
       // Find an existing theme ONLY inside the current workspace.
       let theme = await tx.theme.findFirst({
         where: {
