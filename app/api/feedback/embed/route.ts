@@ -39,7 +39,7 @@ export async function POST() {
 
       const vectorLiteral = `[${vector.join(",")}]`;
 
-      await db.$transaction(async (tx) => {
+      await db.$transaction(async (tx: any) => {
         await tx.embedding.create({
           data: {
             feedbackId: item.id,
